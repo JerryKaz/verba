@@ -1,8 +1,17 @@
 import { GoogleGenAI } from "@google/genai";
 
-const apiKey = process.env.GEMINI_API_KEY;
+let genAI: GoogleGenAI | null = null;
 
-export const ai = new GoogleGenAI({ apiKey: apiKey || "" });
+function getGenAI(): GoogleGenAI {
+  if (!genAI) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY is not configured. Please add your API key in the AI Studio settings.");
+    }
+    genAI = new GoogleGenAI({ apiKey });
+  }
+  return genAI;
+}
 
 // Offline support: Cache for previous translations and a basic dictionary
 const OFFLINE_CACHE_KEY = 'translation_cache';
@@ -93,7 +102,7 @@ export async function translateText(text: string, sourceLang: string, targetLang
   
   Text: ${text}`;
 
-  const response = await ai.models.generateContent({
+  const response = await getGenAI().models.generateContent({
     model: "gemini-3-flash-preview",
     contents: prompt,
   });
@@ -120,7 +129,7 @@ export async function translateDocument(base64Image: string, targetLang: string)
   TRANSLATED TEXT:
   [Translated text]`;
 
-  const response = await ai.models.generateContent({
+  const response = await getGenAI().models.generateContent({
     model: "gemini-3-flash-preview",
     contents: {
       parts: [
@@ -166,7 +175,7 @@ export async function analyzeDocument(content: string | { data: string; mimeType
     };
   }
 
-  const response = await ai.models.generateContent({
+  const response = await getGenAI().models.generateContent({
     model: "gemini-3-flash-preview",
     contents: contents,
   });
@@ -201,7 +210,7 @@ export async function generatePhonetic(text: string, lang: string): Promise<stri
   
   Text: ${text}`;
 
-  const response = await ai.models.generateContent({
+  const response = await getGenAI().models.generateContent({
     model: "gemini-3-flash-preview",
     contents: prompt,
   });
@@ -210,7 +219,7 @@ export async function generatePhonetic(text: string, lang: string): Promise<stri
 }
 
 export async function chatWithAI(messages: { role: 'user' | 'model', parts: { text: string }[] }[]): Promise<string> {
-  const response = await ai.models.generateContent({
+  const response = await getGenAI().models.generateContent({
     model: "gemini-3-flash-preview",
     contents: messages,
   });
