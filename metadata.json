@@ -1,0 +1,6 @@
+{
+  "name": "Verba",
+  "description": "A sophisticated linguistic engine for professional translation, document analysis, and verbal intelligence.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}
