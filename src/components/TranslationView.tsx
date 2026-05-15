@@ -1,7 +1,7 @@
 import { ArrowRightLeft, AudioLines, BookMarked, Check, CloudOff, Copy, DownloadCloud, FileSearch, FileText, Languages, Mic, MicOff, Monitor, Moon, Play, Plus, Settings2, Sun, Trash2, Volume2, VolumeX, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import React, { useEffect, useRef, useState } from 'react';
-import { generatePhonetic, translateText, clearTranslationCache, analyzeDocument } from '../services/ai';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { generatePhonetic, translateText, clearTranslationCache, clearAnalysisCache, analyzeDocument, spellcheckText } from '../services/ai';
 import { LANGUAGES } from '../types';
 import mammoth from 'mammoth';
 
@@ -30,6 +30,10 @@ export function TranslationView({ onTranslated, initialSource = "", initialResul
   const [isPhoneticLoading, setIsPhoneticLoading] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [spellcheckErrors, setSpellcheckErrors] = useState<Array<{ original: string, suggestions: string[] }>>([]);
+  const [isSpellchecking, setIsSpellchecking] = useState(false);
+  const [activeSpellError, setActiveSpellError] = useState<{ original: string, suggestions: string[], index: number } | null>(null);
+  const [tooltipPos, setTooltipPos] = useState({ top: 0, left: 0 });
   const [speechRate, setSpeechRate] = useState(1);
   const [speechPitch, setSpeechPitch] = useState(1);
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
@@ -244,6 +248,38 @@ export function TranslationView({ onTranslated, initialSource = "", initialResul
     setGlossary(prev => prev.filter(e => e.id !== id));
   };
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (sourceText.trim() && isOnline) {
+        performSpellcheck(sourceText);
+      } else {
+        setSpellcheckErrors([]);
+      }
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [sourceText, isOnline, sourceLang]);
+
+  const performSpellcheck = async (text: string) => {
+    setIsSpellchecking(true);
+    try {
+      // Use sourceLang if not 'auto', otherwise default to English for spellcheck or skip
+      const lang = sourceLang === 'auto' ? 'en' : sourceLang;
+      const errors = await spellcheckText(text, lang);
+      setSpellcheckErrors(errors);
+    } catch (err) {
+      console.error("Spellcheck failed", err);
+    } finally {
+      setIsSpellchecking(false);
+    }
+  };
+
+  const applyCorrection = (original: string, suggestion: string) => {
+    const newText = sourceText.replace(original, suggestion);
+    setSourceText(newText);
+    setActiveSpellError(null);
+    handleTranslate(newText);
+  };
+
   const handleDocumentAnalysis = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -373,23 +409,39 @@ export function TranslationView({ onTranslated, initialSource = "", initialResul
                 })}
               </div>
               
-              <div className="p-5 bg-[#FBFBFD] border-t border-slate-100 flex items-center justify-between">
-                <div>
-                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.1em]">Total Session Footprint</p>
-                  <p className="text-[11px] text-slate-700 font-bold mt-0.5">~{downloadedPacks.length * 45}MB Secure Data</p>
+              <div className="p-5 bg-[#FBFBFD] border-t border-slate-100 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.1em]">Total Session Footprint</p>
+                    <p className="text-[11px] text-slate-700 font-bold mt-0.5">~{downloadedPacks.length * 45}MB Secure Data</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => {
+                        clearTranslationCache();
+                        alert("Translation cache cleared successfully.");
+                      }}
+                      className="px-3 py-2 bg-white border border-slate-200 text-red-500 text-[10px] font-bold uppercase tracking-widest rounded-xl hover:border-red-100 hover:bg-red-50 transition-all flex items-center gap-2 shadow-sm"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Wipe Translations
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => {
+                        clearAnalysisCache();
+                        alert("Analysis cache cleared successfully.");
+                      }}
+                      className="px-3 py-2 bg-white border border-slate-200 text-purple-500 text-[10px] font-bold uppercase tracking-widest rounded-xl hover:border-purple-100 hover:bg-purple-50 transition-all flex items-center gap-2 shadow-sm"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Wipe Analysis
+                    </motion.button>
+                  </div>
                 </div>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => {
-                    clearTranslationCache();
-                    alert("Common translation cache cleared successfully.");
-                  }}
-                  className="px-4 py-2 bg-white border border-slate-200 text-red-500 text-[10px] font-bold uppercase tracking-widest rounded-xl hover:border-red-100 hover:bg-red-50 transition-all flex items-center gap-2 shadow-sm"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Wipe Cache
-                </motion.button>
               </div>
             </motion.div>
           </>
@@ -809,15 +861,94 @@ export function TranslationView({ onTranslated, initialSource = "", initialResul
               </motion.button>
             </div>
           </div>
-          <textarea
-            value={sourceText}
-            onChange={(e) => setSourceText(e.target.value)}
-            onBlur={() => handleTranslate()}
-            placeholder="Enter text to translate..."
-            className={`flex-1 w-full text-lg md:text-2xl placeholder:text-slate-200 bg-transparent border-none focus:ring-0 resize-none font-semibold leading-[1.6] transition-colors duration-500 ${
-              resolvedTheme === 'dark' ? 'text-white' : 'text-slate-800'
-            }`}
-          />
+          <div className="relative flex-1 group/input">
+            <textarea
+              value={sourceText}
+              onChange={(e) => {
+                setSourceText(e.target.value);
+                setActiveSpellError(null);
+              }}
+              onBlur={() => handleTranslate()}
+              placeholder="Enter text to translate..."
+              className={`w-full h-full text-lg md:text-2xl placeholder:text-slate-200 bg-transparent border-none focus:ring-0 resize-none font-semibold leading-[1.6] transition-colors duration-500 relative z-10 ${
+                resolvedTheme === 'dark' ? 'text-white' : 'text-slate-800'
+              }`}
+            />
+            
+            {/* Spellcheck Underlines Layer */}
+            <div 
+              className={`absolute inset-0 pointer-events-none select-none text-lg md:text-2xl font-semibold leading-[1.6] whitespace-pre-wrap break-words p-0 overflow-hidden transition-colors duration-500 ${
+                resolvedTheme === 'dark' ? 'text-transparent' : 'text-transparent'
+              }`}
+              style={{ padding: 'inherit', fontFamily: 'inherit' }}
+            >
+              {sourceText.split(/(\s+)/).map((part, i) => {
+                const error = spellcheckErrors.find(e => e.original.toLowerCase() === part.toLowerCase().replace(/[.,!?;:]/g, ''));
+                if (error) {
+                  return (
+                    <span 
+                      key={i} 
+                      className="border-b-2 border-red-500/50 decoration-wavy underline-offset-4 cursor-help pointer-events-auto"
+                      onClick={(e) => {
+                        const rect = (e.target as HTMLElement).getBoundingClientRect();
+                        setTooltipPos({ top: rect.bottom + 5, left: rect.left });
+                        setActiveSpellError({ ...error, index: i });
+                      }}
+                    >
+                      {part}
+                    </span>
+                  );
+                }
+                return <span key={i}>{part}</span>;
+              })}
+            </div>
+
+            {/* Suggestions Tooltip */}
+            <AnimatePresence>
+              {activeSpellError && (
+                <>
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 z-[60] bg-slate-900/5" 
+                    onClick={() => setActiveSpellError(null)} 
+                  />
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    style={{ 
+                      position: 'fixed', 
+                      top: tooltipPos.top, 
+                      left: tooltipPos.left,
+                      zIndex: 70
+                    }}
+                    className="bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-slate-100 p-2 min-w-[180px] overflow-hidden"
+                  >
+                    <div className="px-3 py-2 border-b border-slate-50 mb-1 flex items-center justify-between">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Correction: "{activeSpellError.original}"</p>
+                      <button onClick={() => setActiveSpellError(null)} className="p-1 hover:bg-slate-50 rounded-lg">
+                        <X className="w-3 h-3 text-slate-300" />
+                      </button>
+                    </div>
+                    <div className="space-y-1">
+                      {activeSpellError.suggestions.map((s, i) => (
+                        <button
+                          key={i}
+                          onClick={() => applyCorrection(activeSpellError.original, s)}
+                          className="w-full text-left px-3 py-2.5 text-[14px] font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-600 rounded-xl transition-all flex items-center justify-between group"
+                        >
+                          {s}
+                          <Check className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
           <div className="pt-6 md:pt-8 flex justify-between items-center">
             <span className="text-[10px] text-slate-300 font-bold uppercase tracking-widest">{sourceText.length} Characters</span>
             <motion.button 
